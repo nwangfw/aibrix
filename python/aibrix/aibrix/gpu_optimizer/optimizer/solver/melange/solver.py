@@ -8,7 +8,9 @@ from .util import tputs_to_loads_2d
 # found at https://github.com/tyler-griggs/melange-release
 # See: https://tyler-griggs.github.io/blogs/melange
 class Solver:
-    def __init__(self, workload_distribution: list, total_request_rate: float, gpu_info: dict):
+    def __init__(
+        self, workload_distribution: list, total_request_rate: float, gpu_info: dict
+    ):
         self.workload_distribution = workload_distribution
         self.overall_rate = total_request_rate
         self.gpu_info = gpu_info
@@ -111,7 +113,7 @@ class MelangeSolver(Solver):
                 )
                 <= decision_vector[j]
             )
-            
+
         # C3: Each GPU type count must not exceed its maximum constraint
         for j in range(len(decision_vector)):
             problem += decision_vector[j] <= max_gpu_counts[j]
@@ -125,10 +127,10 @@ class MelangeSolver(Solver):
 
         # Print the results if needed
         if logs:
-            print(f"Decision Matrix:")
+            print("Decision Matrix:")
             for row in decision_matrix:
                 print([var.value() for var in row])
-            print(f"Decision Vector:")
+            print("Decision Vector:")
             print(f"{[var.value() for var in decision_vector]}")
 
         if pulp.LpStatus[problem.status] != "Optimal":
