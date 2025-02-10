@@ -1,0 +1,26 @@
+{
+    "workload_distribution": [
+        [0.4, 0.1],
+        [0.1, 0.4]
+    ],
+    "total_request_rate": 100,
+    "gpu_info": {
+        "A10G": {
+            "cost": 1.5,
+            "tputs": [
+                [100, 40],
+                [30, 15]
+            ],
+            "max_count": 2
+        },
+        "A100-80GB": {
+            "cost": 3.0,
+            "tputs": [
+                [120, 100],
+                [90, 80]
+            ],
+            "max_count": 1
+        }
+    },
+    "slice_factor": 4
+} 

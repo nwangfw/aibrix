@@ -8,9 +8,7 @@ from .util import tputs_to_loads_2d
 # found at https://github.com/tyler-griggs/melange-release
 # See: https://tyler-griggs.github.io/blogs/melange
 class Solver:
-    def __init__(
-        self, workload_distribution: list, total_request_rate: float, gpu_info: dict
-    ):
+    def __init__(self, workload_distribution: list, total_request_rate: float, gpu_info: dict):
         self.workload_distribution = workload_distribution
         self.overall_rate = total_request_rate
         self.gpu_info = gpu_info
@@ -29,6 +27,11 @@ class MelangeSolver(Solver):
     ):
         super().__init__(workload_distribution, total_request_rate, gpu_info)
         self.slice_factor = slice_factor
+        # Add default max GPU constraints if not provided
+        for gpu in self.gpu_info:
+            if "max_count" not in self.gpu_info[gpu]:
+                # Use a large number instead of infinity for PuLP compatibility
+                self.gpu_info[gpu]["max_count"] = 1000000
 
     def run(self, logs=False):
         # Multiply overall rate across distribution.
@@ -46,6 +49,7 @@ class MelangeSolver(Solver):
 
         gpu_types = list(self.gpu_info.keys())
         cost_vector = [self.gpu_info[gpu]["cost"] for gpu in gpu_types]
+        max_gpu_counts = [self.gpu_info[gpu]["max_count"] for gpu in gpu_types]
 
         # Create slices, which is a single dimension.
         slices = []
@@ -107,6 +111,10 @@ class MelangeSolver(Solver):
                 )
                 <= decision_vector[j]
             )
+            
+        # C3: Each GPU type count must not exceed its maximum constraint
+        for j in range(len(decision_vector)):
+            problem += decision_vector[j] <= max_gpu_counts[j]
 
         # Solve the problem
         problem.solve(pulp.PULP_CBC_CMD(msg=0))
@@ -117,10 +125,10 @@ class MelangeSolver(Solver):
 
         # Print the results if needed
         if logs:
-            print("Decision Matrix:")
+            print(f"Decision Matrix:")
             for row in decision_matrix:
                 print([var.value() for var in row])
-            print("Decision Vector:")
+            print(f"Decision Vector:")
             print(f"{[var.value() for var in decision_vector]}")
 
         if pulp.LpStatus[problem.status] != "Optimal":
