@@ -157,6 +157,14 @@ Below are routing strategies gateway supports
     }'
 
 
+You can check the header ``target-pod`` to see which pod the request is routed to. If you use random routing strategy, the target pod will be different for each request. On the other hand, if you use prefix-cache routing strategy, the target pod will be the same for the same request.
+
+.. figure:: ../assets/images/gateway-routing-target-pod-ip.png
+  :alt: gateway-routing-target-pod-ipn
+  :width: 70%
+  :align: center
+
+
 Rate Limiting
 -------------
 
