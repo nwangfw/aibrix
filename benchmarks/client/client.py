@@ -240,7 +240,7 @@ async def benchmark_batch(client: openai.AsyncOpenAI,
                 send_request_batch(client = client,
                                    model = model,
                                    endpoint = endpoint,
-                                   formatted_prompt = formatted_prompts[i],
+                                   prompt = formatted_prompts[i],
                                    output_file = output_file,
                                    request_id = request_id)
             )
@@ -257,12 +257,17 @@ def main(args):
         load_struct = load_workload(args.workload_path)
         if args.api_key is None:
             client = openai.AsyncOpenAI(
+                api_key="any key",
                 base_url=args.endpoint + "/v1",
+                max_retries=0,
+                timeout=60.0
             )
         else:
             client = openai.AsyncOpenAI(
                 api_key=args.api_key,
                 base_url=args.endpoint + "/v1",
+                max_retries=0,
+                timeout=60.0
             )
         if args.routing_strategy is not None:
             client = client.with_options(

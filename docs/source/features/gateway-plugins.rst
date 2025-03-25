@@ -130,7 +130,7 @@ After you enable the authentication, you can query model with ``-H Authorization
     -H "Authorization: Bearer any_key" \
     -d '{
         "model": "deepseek-r1-distill-llama-8b",
-        "messages": [{"role": "user", "content": "Say this is a test!"}],
+        "messages": [{"role": "user", "content": "What is large language models?"}],
         "temperature": 0.7
     }'
 
@@ -148,16 +148,16 @@ Below are routing strategies gateway supports
 .. code-block:: bash
 
     curl -v http://${ENDPOINT}/v1/chat/completions \
-    -H "routing-strategy: least-request" \
+    -H "routing-strategy: random" \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "your-model-name",
-        "messages": [{"role": "user", "content": "Say this is a test!"}],
+        "model": "deepseek-r1-distill-llama-8b",
+        "messages": [{"role": "user", "content": "What is large language models?"}],
         "temperature": 0.7
     }'
 
 
-You can check the header ``target-pod`` to see which pod the request is routed to. If you use random routing strategy, the target pod will be different for each request. On the other hand, if you use prefix-cache routing strategy, the target pod will be the same for the same request.
+You can check the header ``target-pod`` info to see which pod the request is routed to by gateway. If you use random routing strategy, the target pod will be different for each request. On the other hand, if you use prefix-cache routing strategy, the target pod will be the same for the same request.
 
 .. figure:: ../assets/images/gateway-routing-target-pod-ip.png
   :alt: gateway-routing-target-pod-ipn
