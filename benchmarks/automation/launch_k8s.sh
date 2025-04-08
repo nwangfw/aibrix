@@ -4,6 +4,9 @@ echo -e "This script will deploy a Kubernetes cluster on the cloud and GPUs spec
 
 set -ex
 
+# Activate the virtual environment
+source .venv/bin/activate
+
 # Read cluster name from environment variable if it exists, else use default value
 CLUSTER_NAME=${CLUSTER_NAME:-k8s}
 

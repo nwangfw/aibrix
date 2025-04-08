@@ -1,6 +1,6 @@
-.PHONY: all clean setup-env setup-k8s install-aibrix
+.PHONY: all clean setup-env setup-k8s install-aibrix deploy-model benchmark
 
-all: setup-env setup-k8s install-aibrix
+all: setup-env setup-k8s install-aibrix deploy-model benchmark
 
 setup-env:
 	@echo "Setting up environment..."
@@ -17,8 +17,20 @@ install-aibrix:
 	@chmod +x install_aibrix.sh
 	@./install_aibrix.sh
 
+deploy-model:
+	@echo "Deploying model..."
+	@chmod +x deploy_model.sh
+	@./deploy_model.sh
+
+benchmark:
+	@echo "Running benchmark..."
+	@chmod +x benchmarking.sh
+	@./benchmarking.sh
+
 clean:
 	@echo "Cleaning up..."
+	@echo "Terminating Kubernetes cluster..."
+	@sky down -y k8s || true
 	@rm -rf aibrix
 	@rm -rf .venv
 	@echo "Cleanup complete" 

@@ -62,7 +62,9 @@ echo "Generated K3S token: $K3S_TOKEN"
 # Update cloud_k8s.yaml with the generated token
 if [ -f "cloud_k8s.yaml" ]; then
     echo "Updating cloud_k8s.yaml with K3S token..."
-    sed -i '' "s/SKY_K3S_TOKEN:.*/SKY_K3S_TOKEN: $K3S_TOKEN/" cloud_k8s.yaml
+    # Escape forward slashes in the token
+    ESCAPED_TOKEN=$(echo "$K3S_TOKEN" | sed 's/\//\\\//g')
+    sed -i '' "s/SKY_K3S_TOKEN:.*/SKY_K3S_TOKEN: $ESCAPED_TOKEN/" cloud_k8s.yaml
 else
     echo "Warning: cloud_k8s.yaml not found. Please create it manually with the K3S token."
 fi
