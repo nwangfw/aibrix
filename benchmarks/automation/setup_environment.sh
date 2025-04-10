@@ -8,6 +8,15 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to detect OS and set appropriate sed command
+get_sed_command() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "sed -i ''"
+    else
+        echo "sed -i"
+    fi
+}
+
 # Check and install required packages
 echo "Checking and installing required packages..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -32,7 +41,13 @@ fi
 # Install kubectl if not already installed
 if ! command_exists kubectl; then
     echo "Installing kubectl..."
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/darwin/amd64/kubectl"
+    else
+        # Linux
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    fi
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 fi
 
@@ -52,7 +67,7 @@ chmod 700 ~/.lambda_cloud
 
 # Create lambda_keys file with hardcoded API key
 echo "Creating Lambda Cloud credentials file..."
-echo "api_key = "replace with your api key" > ~/.lambda_cloud/lambda_keys
+echo "api_key = <replace with your lambda cloud API key>" > ~/.lambda_cloud/lambda_keys
 
 # Generate a strong passphrase for K3S token
 echo "Generating K3S token..."
@@ -64,7 +79,9 @@ if [ -f "cloud_k8s.yaml" ]; then
     echo "Updating cloud_k8s.yaml with K3S token..."
     # Escape forward slashes in the token
     ESCAPED_TOKEN=$(echo "$K3S_TOKEN" | sed 's/\//\\\//g')
-    sed -i '' "s/SKY_K3S_TOKEN:.*/SKY_K3S_TOKEN: $ESCAPED_TOKEN/" cloud_k8s.yaml
+    # Use OS-specific sed command
+    SED_CMD=$(get_sed_command)
+    $SED_CMD "s/SKY_K3S_TOKEN:.*/SKY_K3S_TOKEN: $ESCAPED_TOKEN/" cloud_k8s.yaml
 else
     echo "Warning: cloud_k8s.yaml not found. Please create it manually with the K3S token."
 fi

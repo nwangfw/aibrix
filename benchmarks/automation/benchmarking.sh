@@ -118,7 +118,7 @@ spec:
             --api-key "${API_KEY}" \
             --port 8000 \
             --host "${MODEL_NAME}.default.svc.cluster.local" \
-            --output result/${MODEL_NAME}.jsonl
+            --output /results/${MODEL_NAME}.jsonl
           
           echo "Benchmark completed with exit code: $?"
           
@@ -133,7 +133,7 @@ spec:
           value: ${MODEL_NAME}.default.svc.cluster.local
         volumeMounts:
         - name: results
-          mountPath: /usr/local/lib/python3.11/site-packages/aibrix/gpu_optimizer/optimizer/profiling/result
+          mountPath: /results
       volumes:
       - name: results
         emptyDir: {}
@@ -148,11 +148,16 @@ DEPLOYMENT_POD=$(kubectl get pods -l app=${MODEL_NAME}-benchmark -o jsonpath='{.
 
 #TODO: Need a better way to check if the benchmark is complete)
 log "Waiting for benchmark to complete..."
-sleep 300  
+sleep 180  
 
 # Copy results from the pod to local directory
 log "Copying results from pod..."
-kubectl cp ${DEPLOYMENT_POD}:/usr/local/lib/python3.11/site-packages/aibrix/gpu_optimizer/optimizer/profiling/result/${MODEL_NAME}.jsonl "${RESULTS_DIR}/${MODEL_NAME}.jsonl"
+kubectl cp ${DEPLOYMENT_POD}:/results/${MODEL_NAME}.jsonl "${RESULTS_DIR}/${MODEL_NAME}.jsonl"
+
+# Verify the copy was successful
+if [ ! -f "${RESULTS_DIR}/${MODEL_NAME}.jsonl" ]; then
+    error "Failed to copy results file from pod"
+fi
 
 # Get the logs from the pod
 log "Getting benchmark logs..."

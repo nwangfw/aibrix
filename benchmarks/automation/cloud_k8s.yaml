@@ -7,7 +7,7 @@ resources:
 num_nodes: 1
 
 envs:
-  SKY_K3S_TOKEN: 7CVbRAdd6C0nYza7CYXHcw==
+  SKY_K3S_TOKEN: gyzSvfoh0yxQFmad1Nyi1g==
 
 run: |
   wait_for_gpu_operator_installation() {
@@ -41,7 +41,13 @@ run: |
   fi 
 
   # Head node
-  curl -sfL https://get.k3s.io | K3S_TOKEN=${SKY_K3S_TOKEN} sh -
+  echo "Installing k3s on head node"
+  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
+  
+  # Wait for k3s service to start
+  echo "Waiting for k3s service to start"
+  systemctl status k3s || true
+  journalctl -u k3s -n 50 || true
   
   # Copy over kubeconfig file
   echo "Copying kubeconfig file"
@@ -51,7 +57,7 @@ run: |
 
   # Wait for k3s to be ready
   echo "Waiting for k3s to be ready"
-  sleep 5
+  sleep 10
   kubectl wait --for=condition=ready node --all --timeout=5m --kubeconfig ~/.kube/config
 
   # =========== GPU support ===========
