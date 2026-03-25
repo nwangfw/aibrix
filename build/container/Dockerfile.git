@@ -41,10 +41,10 @@ ENV AIBRIX_TARGET_DEVICE=cuda
 COPY --from=torch-version /torch_version.txt /tmp/torch_version.txt
 COPY --from=sources /artifacts/src /artifacts/src
 
-RUN ${PYTHON_BIN} -m pip install --no-cache-dir \
+RUN ${PYTHON_BIN} -m pip install --index-url=https://bytedpypi.byted.org/simple \
         -r /artifacts/src/aibrix/python/aibrix_kvcache/requirements/build.txt \
         -r /artifacts/src/aibrix/python/aibrix_kvcache/requirements/core.txt && \
-    ${PYTHON_BIN} -m pip install --no-cache-dir torch==$(cat /tmp/torch_version.txt) && rm /tmp/torch_version.txt && \
+    ${PYTHON_BIN} -m pip install --index-url=https://bytedpypi.byted.org/simple torch==$(cat /tmp/torch_version.txt) && rm /tmp/torch_version.txt && \
     cd /artifacts/src/aibrix && \
     ${PYTHON_BIN} -m build python/aibrix_kvcache --wheel --outdir=/artifacts/wheels --no-isolation
 
@@ -57,6 +57,7 @@ FROM scratch AS artifacts
 COPY --from=pack /artifacts/sources /artifacts/sources
 COPY --from=pack /artifacts/packages /artifacts/packages
 COPY --from=wheel-builder /artifacts/wheels /artifacts/wheels
+COPY build/container/vllm-configs/ /artifacts/vllm-configs/
 
 FROM debian:bookworm-slim AS debug
 COPY --from=artifacts /artifacts /artifacts
