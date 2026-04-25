@@ -1,0 +1,54 @@
+# Sample profile catalog consumed by
+# aibrix.planner.profile_store.LocalFileProfileStore.
+#
+# This file is *not* loaded automatically. Copy it somewhere the planner can
+# read and point PLANNER_PROFILES_PATH at the copy, e.g. for local dev:
+#
+#   cp aibrix/planner/examples/planner-profiles.yaml /tmp/planner-profiles.yaml
+#   PLANNER_PROFILES_PATH=/tmp/planner-profiles.yaml \
+#   PLANNER_RM_BASE_URL=http://127.0.0.1:8080 \
+#     aibrix_planner --port 8090
+#
+# Schema (one entry per (model_id, gpu_type), see
+# aibrix.planner.models.ModelGPUProfile):
+#
+#   model_id (str, required)               : matches PlannerJob.model_id
+#   gpu_type (str, required)               : GPU SKU, e.g. H20, A100, H100
+#   throughput (float, required)           : tokens/sec for ONE worker replica
+#   single_model_gpu_number (int, required): GPUs needed per worker replica
+#   gpu_cost (float, required)             : relative cost factor (cost-aware
+#                                            policies only; FCFS ignores it)
+#   model_config_params (object, optional) : deployment hints (TP, PP, ...)
+#
+# Notes:
+#   - The numbers below are illustrative, not benchmarked. Replace them with
+#     real measurements from your fleet before relying on them.
+#   - A bad path or malformed file raises ProfileStoreError (HTTP 500) at
+#     startup, so the planner refuses to come up rather than silently
+#     degrading every plan cycle to a no-op.
+#   - Both YAML and JSON are accepted; the file extension chooses the parser.
+
+profiles:
+  - model_id: qwen32
+    gpu_type: H20
+    throughput: 100.0
+    single_model_gpu_number: 8
+    gpu_cost: 1.0
+    model_config_params:
+      tensor_parallel_size: 8
+      pipeline_parallel_size: 1
+
+  - model_id: qwen32
+    gpu_type: A100
+    throughput: 60.0
+    single_model_gpu_number: 8
+    gpu_cost: 0.7
+
+  - model_id: llama3-70b
+    gpu_type: H100
+    throughput: 220.0
+    single_model_gpu_number: 4
+    gpu_cost: 1.5
+    model_config_params:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1

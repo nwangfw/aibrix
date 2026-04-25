@@ -29,6 +29,8 @@ from aibrix.metadata.api.v1 import batch, files, models, users
 from aibrix.metadata.cache import JobCache
 from aibrix.metadata.core import HTTPXClientWrapper
 from aibrix.metadata.setting import settings
+from aibrix.planner.api.v1 import planner
+from aibrix.planner.service import init_planner_engine, shutdown_planner_engine
 from aibrix.metadata.store import RedisMetadataStore
 from aibrix.storage import create_storage
 
@@ -116,16 +118,53 @@ async def lifespan(app: FastAPI):
             f"Metadata store initialized: {envs.STORAGE_REDIS_HOST}:{envs.STORAGE_REDIS_PORT}"
         )
 
+
+async def close_redis_client(app: FastAPI) -> None:
+    if hasattr(app.state, "redis_client"):
+        await app.state.redis_client.aclose()  # type: ignore[attr-defined]
+        logger.info("Redis client closed")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Code executed on startup
+    logger.info("Initializing FastAPI app...")
+
+    # Initialize metadata store (abstraction over Redis) only if not already set
+    # (e.g., tests may pre-configure a mock store before lifespan runs)
+    if not hasattr(app.state, "metadata_store") or app.state.metadata_store is None:
+        metadata_store = RedisMetadataStore(
+            host=envs.STORAGE_REDIS_HOST or "localhost",
+            port=envs.STORAGE_REDIS_PORT,
+            db=envs.STORAGE_REDIS_DB,
+            password=envs.STORAGE_REDIS_PASSWORD,
+        )
+        app.state.metadata_store = metadata_store
+        # Backward compatibility: expose underlying Redis client for components
+        # that haven't migrated to the MetadataStore interface yet
+        app.state.redis_client = metadata_store.client
+        logger.info(
+            f"Metadata store initialized: {envs.STORAGE_REDIS_HOST}:{envs.STORAGE_REDIS_PORT}"
+        )
+
     if hasattr(app.state, "httpx_client_wrapper"):
         app.state.httpx_client_wrapper.start()
     if hasattr(app.state, "kopf_operator_wrapper"):
         app.state.kopf_operator_wrapper.start()
     if hasattr(app.state, "batch_driver"):
         await app.state.batch_driver.start()
+    if getattr(app.state, "planner_enabled", False):
+        await init_planner_engine(
+            app,
+            rm_base_url=settings.PLANNER_RM_BASE_URL,
+            profiles_path=settings.PLANNER_PROFILES_PATH,
+        )
     yield
 
     # Code executed on shutdown
     logger.info("Finalizing FastAPI app...")
+    if getattr(app.state, "planner_enabled", False):
+        await shutdown_planner_engine(app)
     if hasattr(app.state, "batch_driver"):
         await app.state.batch_driver.stop()
     if hasattr(app.state, "kopf_operator_wrapper"):
@@ -201,6 +240,16 @@ def build_app(args: argparse.Namespace, params={}):
             files.router, prefix=f"{settings.API_V1_STR}/files", tags=["files"]
         )  # mount files api at /v1/files
 
+    # Initialize planner
+    if getattr(args, "enable_planner", False):
+        app.state.planner_enabled = True
+        app.include_router(
+            planner.router,
+            prefix=f"{settings.API_V1_STR}/planner",
+            tags=["planner"],
+        )
+        logger.info("Planner API mounted at /v1/planner")
+
     return app
 
 
@@ -261,6 +310,12 @@ def main():
         type=float,
         default=10.0,
         help="Timeout in seconds for kopf operator shutdown (default: 10.0)",
+    )
+    parser.add_argument(
+        "--enable-planner",
+        action="store_true",
+        default=False,
+        help="Enable planner engine and API",
     )
     parser.add_argument(
         "--e2e-test",

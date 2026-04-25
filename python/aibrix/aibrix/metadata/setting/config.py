@@ -37,6 +37,12 @@ class Settings(AIBrixSettings):
     METASTORE_TYPE: StorageType = StorageType.AUTO
     MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100 MB in bytes
 
+    # --- Planner settings ---
+    PLANNER_RM_BASE_URL: str = "http://localhost:8080"
+    # Path to a YAML/JSON file holding the planner's ModelGPUProfile catalog.
+    # When unset, callers must pass ``profiles`` in every PlanRequest.
+    PLANNER_PROFILES_PATH: Optional[str] = None
+
 
 # Create an instance of the Settings class
 # Pydantic will automatically try to load values from environment variables
