@@ -216,6 +216,12 @@ message CreateJobRequest {
   string model_template_name = 5;
   string model_template_version = 6;  // optional; "" = latest active
 
+  // Parent model catalog id — required when routing create through the
+  // planner (PLANNER_ENABLED) so GPU shape can be looked up from the selected
+  // ModelDeploymentTemplate. The wizard always has this available; SDK
+  // callers leaving it blank fall back to planner defaults (see JobHandler).
+  string model_id = 14;
+
   // Optional batch-wide inference parameter overrides. Currently NOT applied
   // by the handler — per-request values from the JSONL body take precedence.
   // Reserved here so the Console contract is stable; future versions will

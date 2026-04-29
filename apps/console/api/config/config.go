@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // AuthModeDev is the development auth mode name.
@@ -84,6 +85,11 @@ type Config struct {
 	// AllowedOrigins is a comma-separated list of allowed CORS origins.
 	// When empty, CORS is disabled (same-origin only).
 	AllowedOrigins string
+
+	// PlannerEnabled controls whether the in-process planner is mounted.
+	// When false, /api/v1/planner/* routes are not registered and the
+	// scheduler is not constructed. Defaults to true.
+	PlannerEnabled bool
 }
 
 // Load reads configuration from environment variables and applies sensible defaults.
@@ -126,6 +132,7 @@ func Load() (*Config, error) {
 		BasicPassword:                       envOrDefault("BASIC_PASSWORD", ""),
 		StaticFilesDir:                      envOrDefault("STATIC_FILES_DIR", ""),
 		AllowedOrigins:                      envOrDefault("ALLOWED_ORIGINS", ""),
+		PlannerEnabled:                      envBoolOrDefault("PLANNER_ENABLED", true),
 	}, nil
 }
 
@@ -136,6 +143,25 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envBoolOrDefault returns the env variable named key parsed as a bool, or
+// fallback if the variable is unset or unparseable. Accepts the values
+// supported by strconv.ParseBool: 1/0, t/f, T/F, TRUE/FALSE, true/false, etc.
+//
+// Unparseable values silently fall back to the default rather than crash on
+// startup; this matches operator expectations that a typo in a non-critical
+// flag should not block boot.
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // requiredSecret returns the env var value if set. In dev mode it generates a

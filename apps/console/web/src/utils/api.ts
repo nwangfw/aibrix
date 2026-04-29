@@ -48,6 +48,8 @@ export interface CreateJobRequest {
   endpoint: JobEndpoint;
   completionWindow?: '24h';
   name: string;
+  /** Parent model catalog id — forwarded to the planner for template / GPU resolution when PLANNER_ENABLED=true. */
+  modelId?: string;
   // Reserved fields — Console contract keeps them for future per-batch
   // overrides. Backend currently does not forward them.
   maxTokens?: number;

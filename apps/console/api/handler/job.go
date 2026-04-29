@@ -33,12 +33,15 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
+	"github.com/google/uuid"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -46,11 +49,19 @@ import (
 	pb "github.com/vllm-project/aibrix/apps/console/api/gen/console/v1"
 	"github.com/vllm-project/aibrix/apps/console/api/middleware"
 	"github.com/vllm-project/aibrix/apps/console/api/store"
+	"github.com/vllm-project/aibrix/pkg/planner"
 )
 
 const (
 	metadataDisplayName = "display_name"
 	defaultListLimit    = 20
+
+	// Fallback GPU shape when the ModelDeploymentTemplate cannot be resolved
+	// against the Console store (e.g. STORE_TYPE=mysql templates not migrated
+	// yet). Matches the PlannerJob validation constraints (positive values).
+	defaultPlannerGPUType       = "H100-SXM"
+	defaultPlannerGPUCount      = 1
+	defaultPlannerDurationHours = 24
 )
 
 // JobHandler implements console.v1.JobService.
@@ -60,20 +71,23 @@ type JobHandler struct {
 	store                          store.Store
 	openai                         openai.Client
 	defaultModelDeploymentTemplate string
+	// When non-nil, CreateJob runs through Scheduler (RM reserve → batch to
+	// MDS) instead of calling the metadata service synchronously alone.
+	scheduler *planner.Scheduler
 }
 
 // NewJobHandler creates a JobHandler.
-func NewJobHandler(s store.Store, metadataServiceURL, defaultModelDeploymentTemplate string) *JobHandler {
-
-	baseURL := strings.TrimRight(metadataServiceURL, "/")
-	client := openai.NewClient(
-		option.WithBaseURL(baseURL),
-		option.WithAPIKey("aibrix-console"),
-	)
+// mds must be the openai.Client from planner.NewOpenAIClientForMetadataService,
+// wired once in server.Server (shared with HTTPMDSSubmitter when planner runs).
+//
+// sched may be nil: when PLANNER_ENABLED=false the scheduler is unset and
+// CreateJob behaves as a direct POST /v1/batches + overlay (legacy split).
+func NewJobHandler(s store.Store, mds openai.Client, defaultModelDeploymentTemplate string, sched *planner.Scheduler) *JobHandler {
 	return &JobHandler{
 		store:                          s,
-		openai:                         client,
+		openai:                         mds,
 		defaultModelDeploymentTemplate: defaultModelDeploymentTemplate,
+		scheduler:                      sched,
 	}
 }
 
@@ -132,7 +146,10 @@ func (h *JobHandler) GetJob(ctx context.Context, req *pb.GetJobRequest) (*pb.Job
 	return mergeJob(batch, overlay), nil
 }
 
-// CreateJob calls POST /v1/batches and persists the Console-owned overlay.
+// CreateJob either runs the unified planner pipeline (reserve → POST
+// /v1/batches) when a scheduler was injected at construction time, or
+// otherwise POST /v1/batches synchronously plus the Console-owned overlay,
+// preserving prior behavior when PLANNER_ENABLED=false.
 //
 // max_tokens / temperature / top_p / n on the request are intentionally NOT
 // forwarded yet — per-request JSONL values win. They're reserved on the
@@ -144,6 +161,10 @@ func (h *JobHandler) CreateJob(ctx context.Context, req *pb.CreateJobRequest) (*
 	}
 	if req.Endpoint == "" {
 		return nil, status.Error(codes.InvalidArgument, "endpoint is required")
+	}
+
+	if h.scheduler != nil {
+		return h.createJobViaPlanner(ctx, req)
 	}
 
 	completionWindow := req.CompletionWindow
@@ -192,6 +213,128 @@ func (h *JobHandler) CreateJob(ctx context.Context, req *pb.CreateJobRequest) (*
 		klog.Warningf("store.UpsertJob failed for %s: %v", batch.ID, err)
 	}
 	return mergeJob(batch, overlay), nil
+}
+
+func (h *JobHandler) createJobViaPlanner(ctx context.Context, req *pb.CreateJobRequest) (*pb.Job, error) {
+	completionWindow := req.CompletionWindow
+	if completionWindow == "" {
+		completionWindow = string(openai.BatchNewParamsCompletionWindow24h)
+	}
+
+	templateName := strings.TrimSpace(req.GetModelTemplateName())
+	if templateName == "" && h.defaultModelDeploymentTemplate != "" {
+		templateName = h.defaultModelDeploymentTemplate
+	}
+	if templateName == "" {
+		return nil, status.Error(codes.InvalidArgument, "model_template_name is required (or set DEFAULT_BATCH_MODEL_DEPLOYMENT_TEMPLATE)")
+	}
+
+	payloadName := templateName
+	payloadVersion := strings.TrimSpace(req.GetModelTemplateVersion())
+
+	gpuType := defaultPlannerGPUType
+	gpuCount := defaultPlannerGPUCount
+
+	var resolved *pb.ModelDeploymentTemplate
+	if req.GetModelId() != "" {
+		tpl, err := h.store.ResolveModelDeploymentTemplate(ctx, req.GetModelId(), templateName, req.GetModelTemplateVersion())
+		if err != nil {
+			st, ok := status.FromError(err)
+			if ok && st.Code() == codes.Unimplemented {
+				klog.V(2).Infof("ResolveModelDeploymentTemplate unsupported for this store; using GPU defaults for planner")
+			} else if ok && (st.Code() == codes.NotFound || st.Code() == codes.InvalidArgument) {
+				return nil, err
+			} else {
+				klog.Warningf("ResolveModelDeploymentTemplate: %v; using GPU defaults for planner", err)
+			}
+		} else {
+			resolved = tpl
+			payloadName = resolved.GetName()
+			if resolved.GetVersion() != "" {
+				payloadVersion = resolved.GetVersion()
+			}
+			if resolved.GetSpec() != nil && resolved.GetSpec().GetAccelerator() != nil {
+				ac := resolved.GetSpec().GetAccelerator()
+				if ac.GetType() != "" {
+					gpuType = ac.GetType()
+				}
+				if ac.GetCount() > 0 {
+					gpuCount = int(ac.GetCount())
+				}
+			}
+		}
+	}
+
+	md := make(map[string]string)
+	if strings.TrimSpace(req.GetName()) != "" {
+		md[metadataDisplayName] = req.GetName()
+	}
+
+	payload := planner.BatchPayload{
+		InputFileID:          req.GetInputDataset(),
+		Endpoint:             req.Endpoint,
+		CompletionWindow:     completionWindow,
+		Metadata:             md,
+		ModelTemplateName:    payloadName,
+		ModelTemplateVersion: payloadVersion,
+	}
+
+	pj := planner.PlannerJob{
+		JobID:         uuid.New().String(),
+		ModelID:       req.GetModelId(),
+		GPUType:       gpuType,
+		GPUCount:      gpuCount,
+		StartHour:     time.Now().UTC().Unix() / 3600,
+		DurationHours: defaultPlannerDurationHours,
+		BatchPayload:  payload,
+	}
+
+	decision, err := h.scheduler.Schedule(ctx, pj)
+	if err != nil {
+		return nil, mapPlannerScheduleError(err)
+	}
+	if decision.BatchID == "" {
+		return nil, status.Error(codes.Internal, "planner returned empty batch id")
+	}
+
+	batch, err := h.openai.Batches.Get(ctx, decision.BatchID)
+	if err != nil {
+		return nil, mapSDKError(err, "get batch")
+	}
+
+	overlay := &pb.Job{
+		Id:                   batch.ID,
+		Name:                 req.GetName(),
+		CreatedBy:            currentUserEmail(ctx),
+		ModelTemplateName:    payloadName,
+		ModelTemplateVersion: payloadVersion,
+	}
+	if err := h.store.UpsertJob(ctx, overlay); err != nil {
+		klog.Warningf("store.UpsertJob failed for %s: %v", batch.ID, err)
+	}
+	return mergeJob(batch, overlay), nil
+}
+
+// mapPlannerScheduleError maps planner sentinel errors (+ nested openai SDK
+// errors wrapped under ErrMDSSubmitFailed) to gRPC statuses.
+func mapPlannerScheduleError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, planner.ErrInvalidJob):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, planner.ErrCapacityUnavailable):
+		return status.Error(codes.ResourceExhausted, err.Error())
+	case errors.Is(err, planner.ErrRMUnavailable):
+		return status.Error(codes.Unavailable, err.Error())
+	case errors.Is(err, planner.ErrMDSSubmitFailed):
+		// mapSDKError uses errors.As internally, which walks the wrap chain.
+		// Falls back to codes.Unavailable when no *openai.Error is present.
+		return mapSDKError(err, "create batch")
+	default:
+		return status.Errorf(codes.Internal, "planner: %v", err)
+	}
 }
 
 // CancelJob proxies to POST /v1/batches/{id}/cancel and merges with store.
@@ -246,6 +389,40 @@ func mapSDKError(err error, op string) error {
 	return status.Errorf(codes.Unavailable, "%s: %v", op, err)
 }
 
+// batchExtraFields extracts `model` and `usage` from a Batch's raw JSON.
+// openai-go v1 does not surface these on the Batch struct; the metadata
+// service still returns them, so we parse the response body once and let
+// mergeJob populate the gRPC fields.
+func batchExtraFields(b *openai.Batch) (string, *pb.JobUsage) {
+	if b == nil {
+		return "", nil
+	}
+	raw := b.RawJSON()
+	if raw == "" {
+		return "", nil
+	}
+	var x struct {
+		Model string `json:"model"`
+		Usage *struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+			TotalTokens  int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(raw), &x); err != nil {
+		return "", nil
+	}
+	var usage *pb.JobUsage
+	if x.Usage != nil {
+		usage = &pb.JobUsage{
+			InputTokens:  x.Usage.InputTokens,
+			OutputTokens: x.Usage.OutputTokens,
+			TotalTokens:  x.Usage.TotalTokens,
+		}
+	}
+	return x.Model, usage
+}
+
 // mergeJob aggregates the OpenAI Batch state with the Console-side overlay.
 // Either input may be nil. Console-owned fields override anything that may
 // have leaked from the upstream metadata bag.
@@ -255,7 +432,6 @@ func mergeJob(b *openai.Batch, overlay *pb.Job) *pb.Job {
 		job.Id = b.ID
 		job.Object = string(b.Object)
 		job.Endpoint = b.Endpoint
-		job.Model = b.Model
 		job.InputDataset = b.InputFileID
 		job.CompletionWindow = b.CompletionWindow
 		job.Status = string(b.Status)
@@ -281,13 +457,10 @@ func mergeJob(b *openai.Batch, overlay *pb.Job) *pb.Job {
 				Failed:    int32(b.RequestCounts.Failed),
 			}
 		}
-		if b.JSON.Usage.Valid() {
-			job.Usage = &pb.JobUsage{
-				InputTokens:  b.Usage.InputTokens,
-				OutputTokens: b.Usage.OutputTokens,
-				TotalTokens:  b.Usage.TotalTokens,
-			}
-		}
+		// model / usage aren't on the openai-go v1 Batch struct (v3 added them
+		// as extensions). Parse from the raw response so the gRPC contract
+		// keeps these fields populated.
+		job.Model, job.Usage = batchExtraFields(b)
 	}
 	if overlay != nil {
 		if overlay.Name != "" {

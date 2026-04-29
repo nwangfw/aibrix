@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/openai/openai-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -32,6 +33,7 @@ import (
 	"github.com/vllm-project/aibrix/apps/console/api/handler"
 	"github.com/vllm-project/aibrix/apps/console/api/middleware"
 	"github.com/vllm-project/aibrix/apps/console/api/store"
+	"github.com/vllm-project/aibrix/pkg/planner"
 
 	"github.com/vllm-project/aibrix/apps/console/api/config"
 )
@@ -44,6 +46,9 @@ type Server struct {
 	cfg        *config.Config
 	auth       *middleware.AuthMiddleware
 	mysqlStore *store.MySQLStore // nil if using memory store
+	planner    *planner.Scheduler
+	// Shared openai-go client for MDS batches — same pointer passed to JobHandler and HTTPMDSSubmitter.
+	mdsBatchClient openai.Client
 }
 
 // New creates a new console Server from configuration.
@@ -84,11 +89,33 @@ func New(cfg *config.Config) *Server {
 		BasicPassword:    cfg.BasicPassword,
 	}
 
+	// Single openai-go client for MDS (/v1/batches). JobHandler and the
+	// planner's HTTPMDSSubmitter share this instance when both are wired.
+	mdsClient := planner.NewOpenAIClientForMetadataService(cfg.MetadataServiceURL)
+
+	// Planner runs in-process. The MDS submitter uses the same OpenAI client as
+	// JobHandler. The RM client is still the in-memory stub; a real HTTP-backed
+	// pkg/rmclient lands in a follow-up. When cfg.PlannerEnabled is false the
+	// scheduler is not constructed and planner routes are not registered (see
+	// StartHTTP).
+	var plannerScheduler *planner.Scheduler
+	if cfg.PlannerEnabled {
+		plannerScheduler = planner.NewScheduler(
+			planner.NewInMemoryRMClient(),
+			planner.NewHTTPMDSSubmitter(mdsClient),
+		)
+		klog.Infof("Planner enabled (in-process; MDS at %s; stub RM)", cfg.MetadataServiceURL)
+	} else {
+		klog.Info("Planner disabled (PLANNER_ENABLED=false)")
+	}
+
 	return &Server{
-		store:      s,
-		cfg:        cfg,
-		auth:       middleware.NewAuthMiddleware(authCfg),
-		mysqlStore: mysqlStore,
+		store:          s,
+		cfg:            cfg,
+		auth:           middleware.NewAuthMiddleware(authCfg),
+		mysqlStore:     mysqlStore,
+		planner:        plannerScheduler,
+		mdsBatchClient: mdsClient,
 	}
 }
 
@@ -103,7 +130,7 @@ func (s *Server) StartGRPC(addr string) error {
 
 	// Register all service handlers
 	pb.RegisterDeploymentServiceServer(s.grpcServer, handler.NewDeploymentHandler(s.store))
-	pb.RegisterJobServiceServer(s.grpcServer, handler.NewJobHandler(s.store, s.cfg.MetadataServiceURL, s.cfg.DefaultBatchModelDeploymentTemplate))
+	pb.RegisterJobServiceServer(s.grpcServer, handler.NewJobHandler(s.store, s.mdsBatchClient, s.cfg.DefaultBatchModelDeploymentTemplate, s.planner))
 	pb.RegisterModelServiceServer(s.grpcServer, handler.NewModelHandler(s.store))
 	pb.RegisterModelDeploymentTemplateServiceServer(s.grpcServer, handler.NewModelDeploymentTemplateHandler(s.store))
 	pb.RegisterAPIKeyServiceServer(s.grpcServer, handler.NewAPIKeyHandler(s.store))
@@ -149,6 +176,13 @@ func (s *Server) StartHTTP(httpAddr, grpcAddr string) error {
 	// Register file proxy routes
 	fileHandler := handler.NewFileHandler(s.cfg.MetadataServiceURL)
 	fileHandler.RegisterRoutes(mux)
+
+	// Register planner routes only when the planner is enabled. When
+	// disabled, /api/v1/planner/* returns 404 like any other unmounted path.
+	if s.planner != nil {
+		plannerHandler := handler.NewPlannerHandler(s.planner)
+		plannerHandler.RegisterRoutes(mux)
+	}
 
 	// Register auth routes
 	s.auth.RegisterAuthRoutes(mux)

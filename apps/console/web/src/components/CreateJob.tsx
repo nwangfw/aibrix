@@ -221,6 +221,7 @@ export function CreateJob({ onBack }: CreateJobProps) {
         endpoint,
         completionWindow: '24h',
         name: displayName,
+        modelId: selectedModelId,
         modelTemplateName: selectedTemplate?.name,
         modelTemplateVersion: selectedTemplate?.version,
         ...(maxTokens.trim() !== '' && { maxTokens: parseNumber(maxTokens) }),

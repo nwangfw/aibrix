@@ -996,6 +996,11 @@ type CreateJobRequest struct {
 	// through extra_body.aibrix.model_template.
 	ModelTemplateName    string `protobuf:"bytes,5,opt,name=model_template_name,json=modelTemplateName,proto3" json:"model_template_name,omitempty"`
 	ModelTemplateVersion string `protobuf:"bytes,6,opt,name=model_template_version,json=modelTemplateVersion,proto3" json:"model_template_version,omitempty"` // optional; "" = latest active
+	// Parent model catalog id — required when routing create through the
+	// planner (PLANNER_ENABLED) so GPU shape can be looked up from the selected
+	// ModelDeploymentTemplate. The wizard always has this available; SDK
+	// callers leaving it blank fall back to planner defaults (see JobHandler).
+	ModelId string `protobuf:"bytes,14,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
 	// Optional batch-wide inference parameter overrides. Currently NOT applied
 	// by the handler — per-request values from the JSONL body take precedence.
 	// Reserved here so the Console contract is stable; future versions will
@@ -1076,6 +1081,13 @@ func (x *CreateJobRequest) GetModelTemplateName() string {
 func (x *CreateJobRequest) GetModelTemplateVersion() string {
 	if x != nil {
 		return x.ModelTemplateVersion
+	}
+	return ""
+}
+
+func (x *CreateJobRequest) GetModelId() string {
+	if x != nil {
+		return x.ModelId
 	}
 	return ""
 }
@@ -3530,14 +3542,15 @@ const file_console_v1_console_proto_rawDesc = "" +
 	"\alast_id\x18\x03 \x01(\tR\x06lastId\x12\x19\n" +
 	"\bhas_more\x18\x04 \x01(\bR\ahasMore\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xa1\x03\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xbc\x03\n" +
 	"\x10CreateJobRequest\x12#\n" +
 	"\rinput_dataset\x18\x01 \x01(\tR\finputDataset\x12\x1a\n" +
 	"\bendpoint\x18\x02 \x01(\tR\bendpoint\x12+\n" +
 	"\x11completion_window\x18\x03 \x01(\tR\x10completionWindow\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12.\n" +
 	"\x13model_template_name\x18\x05 \x01(\tR\x11modelTemplateName\x124\n" +
-	"\x16model_template_version\x18\x06 \x01(\tR\x14modelTemplateVersion\x12\"\n" +
+	"\x16model_template_version\x18\x06 \x01(\tR\x14modelTemplateVersion\x12\x19\n" +
+	"\bmodel_id\x18\x0e \x01(\tR\amodelId\x12\"\n" +
 	"\n" +
 	"max_tokens\x18\n" +
 	" \x01(\x05H\x00R\tmaxTokens\x88\x01\x01\x12%\n" +

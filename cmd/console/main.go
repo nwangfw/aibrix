@@ -74,8 +74,8 @@ func main() {
 		}
 	}()
 
-	klog.Infof("AIBrix Console started: gRPC=%s HTTP=%s store=%s auth=%s",
-		cfg.GRPCAddr, cfg.HTTPAddr, cfg.StoreType, cfg.AuthMode)
+	klog.Infof("AIBrix Console started: gRPC=%s HTTP=%s store=%s auth=%s planner=%v",
+		cfg.GRPCAddr, cfg.HTTPAddr, cfg.StoreType, cfg.AuthMode, cfg.PlannerEnabled)
 
 	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
