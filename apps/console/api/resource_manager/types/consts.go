@@ -31,6 +31,11 @@ const (
 	ResourceProvisionTypeKubernetes  ResourceProvisionType = "kubernetes"
 	ResourceProvisionTypeLambdaCloud ResourceProvisionType = "lambdaCloud"
 	ResourceProvisionTypeAWS         ResourceProvisionType = "aws"
+	// ResourceProvisionTypeStub is a no-op provisioner used to wire end-to-end
+	// flows (Console -> Planner -> RM -> MDS) before any real provisioner backend
+	// exists. It accepts every Provision call and returns a synthetic running
+	// ProvisionResult; production must select a concrete backend.
+	ResourceProvisionTypeStub ResourceProvisionType = "stub"
 )
 
 // AcceleratorPreferencePrecisionType defines precision type.

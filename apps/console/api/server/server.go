@@ -33,6 +33,9 @@ import (
 	pb "github.com/vllm-project/aibrix/apps/console/api/gen/console/v1"
 	"github.com/vllm-project/aibrix/apps/console/api/handler"
 	"github.com/vllm-project/aibrix/apps/console/api/middleware"
+	plannerclient "github.com/vllm-project/aibrix/apps/console/api/planner/client"
+	plannerimpl "github.com/vllm-project/aibrix/apps/console/api/planner/impl"
+	"github.com/vllm-project/aibrix/apps/console/api/resource_manager/provisioner/stub"
 	"github.com/vllm-project/aibrix/apps/console/api/store"
 
 	"github.com/vllm-project/aibrix/apps/console/api/config"
@@ -118,9 +121,17 @@ func (s *Server) StartGRPC(addr string) error {
 
 	s.grpcServer = grpc.NewServer()
 
+	// Console -> Planner -> RM -> MDS wiring. Walking-skeleton stack:
+	// stub Provisioner + openai-go BatchClient behind a synchronous
+	// Passthrough Planner. Swap stub.New() for a real provisioner
+	// (e.g. RunPod) without touching the handler or planner.
+	batchClient := plannerclient.NewOpenAIBatchClient(s.cfg.MetadataServiceURL)
+	stubProvisioner := stub.New()
+	planner := plannerimpl.NewPassthrough(batchClient, stubProvisioner)
+
 	// Register all service handlers
 	pb.RegisterDeploymentServiceServer(s.grpcServer, handler.NewDeploymentHandler(s.store))
-	pb.RegisterJobServiceServer(s.grpcServer, handler.NewJobHandler(s.store, s.cfg.MetadataServiceURL, s.cfg.DefaultBatchModelDeploymentTemplate, s.cfg.DevMode))
+	pb.RegisterJobServiceServer(s.grpcServer, handler.NewJobHandler(s.store, planner, batchClient, s.cfg.DefaultBatchModelDeploymentTemplate, s.cfg.DevMode))
 	pb.RegisterModelServiceServer(s.grpcServer, handler.NewModelHandler(s.store))
 	pb.RegisterModelDeploymentTemplateServiceServer(s.grpcServer, handler.NewModelDeploymentTemplateHandler(s.store))
 	pb.RegisterAPIKeyServiceServer(s.grpcServer, handler.NewAPIKeyHandler(s.store))
